@@ -1,15 +1,17 @@
 "use client"
 
+import { useEffect } from "react"
 import { SidebarProvider, SidebarInset, SidebarTrigger } from "@/components/ui/sidebar"
 import { AppSidebar } from "@/components/app-sidebar"
 import { Separator } from "@/components/ui/separator"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import {
   Breadcrumb,
   BreadcrumbItem,
   BreadcrumbList,
   BreadcrumbPage,
 } from "@/components/ui/breadcrumb"
+import { useRole } from "@/components/role-provider"
 
 const pageTitles: Record<string, string> = {
   "/dashboard": "Dashboard",
@@ -26,6 +28,22 @@ export default function DashboardLayout({
 }) {
   const pathname = usePathname()
   const pageTitle = pageTitles[pathname] || "MetroMatrix"
+  const router = useRouter()
+  const { isAuthenticated, authLoading } = useRole()
+
+  useEffect(() => {
+    if (!authLoading && !isAuthenticated) {
+      router.replace("/login")
+    }
+  }, [authLoading, isAuthenticated, router])
+
+  if (authLoading) {
+    return <div className="flex h-screen items-center justify-center">Loading...</div>
+  }
+
+  if (!isAuthenticated) {
+    return <div className="flex h-screen items-center justify-center">Redirecting...</div>
+  }
 
   return (
     <SidebarProvider>

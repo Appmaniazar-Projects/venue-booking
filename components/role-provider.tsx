@@ -1,7 +1,9 @@
 "use client"
 
-import React, { createContext, useContext, useState, useCallback } from "react"
+import React, { createContext, useContext, useEffect, useState, useCallback } from "react"
+import type { Session } from "@supabase/supabase-js"
 import type { UserRole } from "@/lib/types"
+import { getSupabaseClient } from "@/lib/supabase-client"
 
 interface RoleContextValue {
   role: UserRole
@@ -9,16 +11,64 @@ interface RoleContextValue {
   toggleRole: () => void
   isAdmin: boolean
   isOperator: boolean
+  isAuthenticated: boolean
+  authLoading: boolean
 }
 
 const RoleContext = createContext<RoleContextValue | null>(null)
 
 export function RoleProvider({ children }: { children: React.ReactNode }) {
-  const [role, setRole] = useState<UserRole>("admin")
+  const [role, setRole] = useState<UserRole>("operator")
+  const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [authLoading, setAuthLoading] = useState(true)
+
+  const roleFromSession = useCallback((session: Session | null): UserRole => {
+    const metadata = session?.user?.user_metadata as Record<string, unknown> | undefined
+    if (metadata?.role === "admin") return "admin"
+    return "operator"
+  }, [])
+
+  useEffect(() => {
+    let unsub: (() => void) | undefined
+
+    async function init() {
+      setAuthLoading(true)
+      try {
+        const supabase = getSupabaseClient()
+        const { data } = await supabase.auth.getSession()
+        setIsAuthenticated(!!data.session)
+        setRole(roleFromSession(data.session ?? null))
+
+        const {
+          data: { subscription },
+        } = supabase.auth.onAuthStateChange((_, session) => {
+          setIsAuthenticated(!!session)
+          setRole(roleFromSession(session))
+        })
+
+        unsub = () => subscription.unsubscribe()
+      } catch (err) {
+        // If Supabase env vars aren't set, keep the app usable in a "demo" mode.
+        // eslint-disable-next-line no-console
+        console.error(err)
+        setIsAuthenticated(false)
+        setRole("operator")
+      } finally {
+        setAuthLoading(false)
+      }
+    }
+
+    void init()
+
+    return () => {
+      unsub?.()
+    }
+  }, [roleFromSession])
 
   const toggleRole = useCallback(() => {
+    if (isAuthenticated) return
     setRole((prev) => (prev === "admin" ? "operator" : "admin"))
-  }, [])
+  }, [isAuthenticated])
 
   return (
     <RoleContext.Provider
@@ -28,6 +78,8 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
         toggleRole,
         isAdmin: role === "admin",
         isOperator: role === "operator",
+        isAuthenticated,
+        authLoading,
       }}
     >
       {children}
