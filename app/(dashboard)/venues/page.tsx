@@ -3,7 +3,7 @@
 import { useState, useMemo } from "react"
 import Link from "next/link"
 import Image from "next/image"
-import { Plus, Search, Users, MapPin } from "lucide-react"
+import { Plus, Search, Users, MapPin, CalendarPlus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
@@ -15,14 +15,18 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { useStore } from "@/lib/store"
+import { useRole } from "@/components/role-provider"
 import { VenueFormDialog } from "@/components/venue-form"
+import { VenueBookingForm } from "@/components/venue-booking-form"
 import type { VenueType } from "@/lib/types"
 
 export default function VenuesPage() {
   const { state } = useStore()
+  const { isAdmin, isOperator } = useRole()
   const [search, setSearch] = useState("")
   const [typeFilter, setTypeFilter] = useState<VenueType | "all">("all")
   const [formOpen, setFormOpen] = useState(false)
+  const [bookingFormOpen, setBookingFormOpen] = useState<string | null>(null)
 
   const filteredVenues = useMemo(() => {
     return state.venues.filter((v) => {
@@ -43,15 +47,17 @@ export default function VenuesPage() {
             Venue Management
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Browse and manage event venues across Green Point
+            {isAdmin ? "Browse and manage event venues across Green Point" : "Browse event venues across Green Point"}
           </p>
         </div>
-        <Button
-          onClick={() => setFormOpen(true)}
-        >
-          <Plus className="h-4 w-4 mr-2" />
-          Add Venue
-        </Button>
+        {isAdmin && (
+          <Button
+            onClick={() => setFormOpen(true)}
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            Add Venue
+          </Button>
+        )}
       </div>
 
       <div className="flex items-center gap-3">
@@ -114,9 +120,25 @@ export default function VenuesPage() {
                 </Badge>
               </div>
               <div className="flex flex-col gap-1.5 p-4">
-                <h3 className="font-semibold text-sm text-primary leading-tight group-hover:underline underline-offset-2">
-                  {venue.name}
-                </h3>
+                <div className="flex items-center justify-between">
+                  <h3 className="font-semibold text-sm text-primary leading-tight group-hover:underline underline-offset-2">
+                    {venue.name}
+                  </h3>
+                  {isOperator && (
+                    <Button
+                      size="sm"
+                      onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        setBookingFormOpen(venue.id)
+                      }}
+                      className="opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <CalendarPlus className="h-3.5 w-3.5 mr-1.5" />
+                      Book Venue
+                    </Button>
+                  )}
+                </div>
                 <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                   <MapPin className="h-3 w-3 shrink-0" />
                   <span className="truncate">{venue.address}</span>
@@ -131,10 +153,22 @@ export default function VenuesPage() {
         </div>
       )}
 
-      <VenueFormDialog
-        open={formOpen}
-        onOpenChange={setFormOpen}
-      />
+      {isAdmin && (
+        <VenueFormDialog
+          open={formOpen}
+          onOpenChange={setFormOpen}
+        />
+      )}
+
+      {isOperator && (
+        <VenueBookingForm
+          open={!!bookingFormOpen}
+          onOpenChange={(open) => {
+            if (!open) setBookingFormOpen(null)
+          }}
+          venue={state.venues.find(v => v.id === bookingFormOpen)}
+        />
+      )}
     </div>
   )
 }

@@ -23,6 +23,10 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
   const [authLoading, setAuthLoading] = useState(true)
 
   const roleFromSession = useCallback((session: Session | null): UserRole => {
+    if (!session?.user) return "operator"
+    
+    // For now, fall back to user_metadata for immediate compatibility
+    // TODO: Once all users have profiles, switch to profiles table lookup
     const metadata = session?.user?.user_metadata as Record<string, unknown> | undefined
     if (metadata?.role === "admin") return "admin"
     return "operator"

@@ -1,7 +1,7 @@
 "use client"
 
-import { useState, useMemo } from "react"
-import { format, parseISO } from "date-fns"
+import { useState, useMemo, useEffect } from "react"
+import { format, parse, parseISO } from "date-fns"
 import {
   Plus,
   Search,
@@ -11,6 +11,9 @@ import {
   Volume2,
   Wine,
   AlertTriangle,
+  CheckCircle,
+  Ban,
+  MessageSquare,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -36,7 +39,20 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import { Textarea } from "@/components/ui/textarea"
+import { Label } from "@/components/ui/label"
 import { useStore } from "@/lib/store"
+import { useRole } from "@/components/role-provider"
 import { RISK_COLORS } from "@/lib/constants"
 import { BookingFormDialog } from "@/components/booking-form"
 import { BookingDetailSheet } from "@/components/booking-detail-sheet"
@@ -49,19 +65,43 @@ const statusStyles: Record<BookingStatus, string> = {
   pending: "bg-amber-500/10 text-amber-700 border-amber-500/20",
   cancelled: "bg-muted text-muted-foreground border-border",
   override: "bg-red-500/10 text-red-700 border-red-500/20",
+  denied: "bg-red-500/10 text-red-700 border-red-500/20",
+}
+
+const statusIcons: Record<BookingStatus, React.ReactNode> = {
+  confirmed: <CheckCircle className="h-3 w-3" />,
+  pending: <AlertTriangle className="h-3 w-3" />,
+  cancelled: <XCircle className="h-3 w-3" />,
+  override: <Ban className="h-3 w-3" />,
+  denied: <Ban className="h-3 w-3" />,
+}
+
+function toStatusLabel(status: BookingStatus) {
+  return status.charAt(0).toUpperCase() + status.slice(1)
+}
+
+function formatTimeLabel(time: string) {
+  return format(parse(time, "HH:mm", new Date()), "h:mm a")
 }
 
 export default function BookingsPage() {
-  const { state, getVenueById, updateBooking } = useStore()
+  const { state, getVenueById, confirmBooking, denyBooking, cancelBooking, deleteBooking } = useStore()
+  const { isAdmin, isOperator } = useRole()
   const [search, setSearch] = useState("")
   const [statusFilter, setStatusFilter] = useState<BookingStatus | "all">("all")
   const [formOpen, setFormOpen] = useState(false)
   const [detailBooking, setDetailBooking] = useState<Booking | null>(null)
   const [detailOpen, setDetailOpen] = useState(false)
+  const [denyDialogOpen, setDenyDialogOpen] = useState(false)
+  const [denyReason, setDenyReason] = useState("")
+  const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null)
 
   const filteredBookings = useMemo(() => {
     return state.bookings
       .filter((b) => {
+        // Operator-specific: Show only operator's bookings
+        if (isOperator && b.organizer !== "Test Operator") return false
+        
         const venue = getVenueById(b.venueId)
         const matchesSearch =
           b.title.toLowerCase().includes(search.toLowerCase()) ||
@@ -75,11 +115,65 @@ export default function BookingsPage() {
         (a, b) =>
           new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
       )
-  }, [state.bookings, search, statusFilter, getVenueById])
+  }, [state.bookings, search, statusFilter, getVenueById, isOperator])
 
-  function handleCancel(booking: Booking) {
-    updateBooking({ ...booking, status: "cancelled" })
-    toast.success(`"${booking.title}" has been cancelled`)
+  async function handleCancel(booking: Booking) {
+    try {
+      if (isAdmin) {
+        await denyBooking(booking.id, "Cancelled by admin")
+      } else {
+        // For operators, let the server handle user ID detection
+        await cancelBooking(booking.id)
+      }
+      toast.success(`"${booking.title}" has been cancelled`)
+    } catch (error) {
+      toast.error("Failed to cancel booking")
+      console.error("Cancel booking error:", error)
+    }
+  }
+
+  async function handleDelete(booking: Booking) {
+    if (confirm(`Are you sure you want to delete "${booking.title}"? This action cannot be undone.`)) {
+      try {
+        await deleteBooking(booking.id)
+        toast.success(`"${booking.title}" has been deleted`)
+      } catch (error) {
+        toast.error("Failed to delete booking")
+        console.error("Delete booking error:", error)
+      }
+    }
+  }
+
+  async function handleConfirm(booking: Booking) {
+    try {
+      await confirmBooking(booking.id)
+      toast.success(`"${booking.title}" has been confirmed`)
+    } catch (error) {
+      toast.error("Failed to confirm booking")
+      console.error("Confirm booking error:", error)
+    }
+  }
+
+  function handleDeny(booking: Booking) {
+    setSelectedBooking(booking)
+    setDenyDialogOpen(true)
+  }
+
+  async function confirmDeny(e: React.MouseEvent) {
+    e.preventDefault()
+    e.stopPropagation()
+    if (selectedBooking && denyReason.trim()) {
+      try {
+        await denyBooking(selectedBooking.id, denyReason.trim())
+        toast.success(`"${selectedBooking.title}" has been denied: ${denyReason}`)
+        setDenyDialogOpen(false)
+        setDenyReason("")
+        setSelectedBooking(null)
+      } catch (error) {
+        toast.error("Failed to deny booking")
+        console.error("Deny booking error:", error)
+      }
+    }
   }
 
   return (
@@ -87,16 +181,21 @@ export default function BookingsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-balance">
-            Booking Management
+            {isOperator ? "My Bookings" : "Booking Management"}
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Create and manage event bookings with conflict detection
+            {isOperator 
+              ? "View and manage your event bookings"
+              : "Create and manage event bookings with conflict detection"
+            }
           </p>
         </div>
-        <Button onClick={() => setFormOpen(true)}>
-          <Plus className="h-4 w-4 mr-2" />
-          New Booking
-        </Button>
+        {isAdmin && (
+          <Button onClick={() => setFormOpen(true)}>
+            <Plus className="h-4 w-4 mr-2" />
+            New Booking
+          </Button>
+        )}
       </div>
 
       <div className="flex items-center gap-3">
@@ -124,6 +223,7 @@ export default function BookingsPage() {
             <SelectItem value="pending">Pending</SelectItem>
             <SelectItem value="override">Override</SelectItem>
             <SelectItem value="cancelled">Cancelled</SelectItem>
+            <SelectItem value="denied">Denied</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -175,7 +275,7 @@ export default function BookingsPage() {
                         {format(parseISO(booking.date), "MMM d, yyyy")}
                       </span>
                       <span className="text-xs text-muted-foreground">
-                        {booking.startTime} - {booking.endTime}
+                        {formatTimeLabel(booking.startTime)} - {formatTimeLabel(booking.endTime)}
                       </span>
                     </div>
                   </TableCell>
@@ -223,11 +323,12 @@ export default function BookingsPage() {
                     <Badge
                       variant="outline"
                       className={cn(
-                        "text-xs capitalize",
+                        "text-xs capitalize flex items-center gap-1.5 px-2 py-1",
                         statusStyles[booking.status]
                       )}
                     >
-                      {booking.status}
+                      {statusIcons[booking.status]}
+                      {toStatusLabel(booking.status)}
                     </Badge>
                   </TableCell>
                   <TableCell>
@@ -254,7 +355,31 @@ export default function BookingsPage() {
                           <Eye className="h-4 w-4 mr-2" />
                           View Details
                         </DropdownMenuItem>
-                        {booking.status !== "cancelled" && (
+                        
+                        {isAdmin && booking.status === "pending" && (
+                          <>
+                            <DropdownMenuItem
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleConfirm(booking)
+                              }}
+                            >
+                              <CheckCircle className="h-4 w-4 mr-2" />
+                              Confirm Booking
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleDeny(booking)
+                              }}
+                            >
+                              <Ban className="h-4 w-4 mr-2" />
+                              Deny Booking
+                            </DropdownMenuItem>
+                          </>
+                        )}
+                        
+                        {booking.status !== "cancelled" && booking.status !== "denied" && (
                           <DropdownMenuItem
                             className="text-destructive"
                             onClick={(e) => {
@@ -263,7 +388,20 @@ export default function BookingsPage() {
                             }}
                           >
                             <XCircle className="h-4 w-4 mr-2" />
-                            Cancel Booking
+                            {isAdmin ? "Cancel Booking" : "Cancel My Booking"}
+                          </DropdownMenuItem>
+                        )}
+                        
+                        {isAdmin && (
+                          <DropdownMenuItem
+                            className="text-destructive"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleDelete(booking)
+                            }}
+                          >
+                            <Ban className="h-4 w-4 mr-2" />
+                            Delete Booking
                           </DropdownMenuItem>
                         )}
                       </DropdownMenuContent>
@@ -293,6 +431,36 @@ export default function BookingsPage() {
         open={detailOpen}
         onOpenChange={setDetailOpen}
       />
+
+      <AlertDialog open={denyDialogOpen} onOpenChange={setDenyDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Deny Booking</AlertDialogTitle>
+            <AlertDialogDescription>
+              Please provide a reason for denying this booking. This will be recorded in the system logs.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="py-4">
+            <Label htmlFor="denyReason">Reason for denial</Label>
+            <Textarea
+              id="denyReason"
+              placeholder="e.g., High noise levels, Weather concerns, Maintenance scheduled, etc."
+              value={denyReason}
+              onChange={(e) => setDenyReason(e.target.value)}
+              className="mt-2"
+            />
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={confirmDeny}
+              disabled={!denyReason.trim()}
+            >
+              Deny Booking
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

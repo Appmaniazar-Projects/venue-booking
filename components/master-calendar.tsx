@@ -33,6 +33,7 @@ interface MasterCalendarProps {
   venueFilter: string
   noiseFilter: boolean
   liquorFilter: boolean
+  bookings?: Booking[] // Optional bookings prop for operator-specific filtering
 }
 
 export function MasterCalendar({
@@ -40,6 +41,7 @@ export function MasterCalendar({
   venueFilter,
   noiseFilter,
   liquorFilter,
+  bookings: propBookings,
 }: MasterCalendarProps) {
   const { state } = useStore()
   const [currentDate, setCurrentDate] = useState(new Date())
@@ -47,8 +49,11 @@ export function MasterCalendar({
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null)
   const [sheetOpen, setSheetOpen] = useState(false)
 
+  // Use prop bookings if provided, otherwise use state bookings
+  const bookings = propBookings || state.bookings
+
   const filteredBookings = useMemo(() => {
-    return state.bookings.filter((b) => {
+    return bookings.filter((b) => {
       if (b.status === "cancelled") return false
       if (riskFilter !== "all" && b.riskLevel !== riskFilter) return false
       if (venueFilter !== "all" && b.venueId !== venueFilter) return false
@@ -56,7 +61,7 @@ export function MasterCalendar({
       if (liquorFilter && !b.liquorLicense) return false
       return true
     })
-  }, [state.bookings, riskFilter, venueFilter, noiseFilter, liquorFilter])
+  }, [propBookings, state.bookings, riskFilter, venueFilter, noiseFilter, liquorFilter])
 
   function getBookingsForDate(date: Date): Booking[] {
     const dateStr = format(date, "yyyy-MM-dd")

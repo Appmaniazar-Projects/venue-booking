@@ -9,21 +9,29 @@ import type {
   OverrideLog,
 } from "./types"
 import {
-  SEED_VENUES,
-  SEED_BOOKINGS,
-  SEED_PARKING_AREAS,
-  SEED_ROADS,
-} from "./seed-data"
-
-const STORAGE_KEY = "metromatrix-state"
-const STORAGE_VERSION_KEY = "metromatrix-version"
-const CURRENT_VERSION = "3" // Bump this to force a re-seed
+  fetchInitialData,
+  createVenue,
+  updateVenue as updateVenueInDB,
+  deleteVenue as deleteVenueFromDB,
+  createBooking,
+  updateBooking as updateBookingInDB,
+  deleteBooking as deleteBookingFromDB,
+  createTriggerLog,
+  createOverrideLog,
+  confirmBooking as confirmBookingInDB,
+  denyBooking as denyBookingInDB,
+  cancelBooking as cancelBookingInDB,
+  subscribeToBookings,
+  subscribeToVenues,
+  subscribeToTriggerLogs,
+  subscribeToOverrideLogs,
+} from "./supabase-services"
 
 const initialState: AppState = {
-  venues: SEED_VENUES,
-  bookings: SEED_BOOKINGS,
-  parkingAreas: SEED_PARKING_AREAS,
-  roads: SEED_ROADS,
+  venues: [],
+  bookings: [],
+  parkingAreas: [],
+  roads: [],
   triggerLogs: [],
   overrideLogs: [],
 }
@@ -92,9 +100,12 @@ interface StoreContextValue {
   addVenue: (venue: Venue) => void
   updateVenue: (venue: Venue) => void
   deleteVenue: (id: string) => void
-  addBooking: (booking: Booking) => void
+  addBooking: (booking: Omit<Booking, 'id' | 'createdAt'>) => void
   updateBooking: (booking: Booking) => void
   deleteBooking: (id: string) => void
+  confirmBooking: (id: string) => void
+  denyBooking: (id: string, reason: string) => void
+  cancelBooking: (id: string, userId?: string) => void
   addTriggerLog: (log: TriggerLog) => void
   addOverrideLog: (log: OverrideLog) => void
   getVenueById: (id: string) => Venue | undefined
@@ -104,86 +115,198 @@ interface StoreContextValue {
 
 const StoreContext = createContext<StoreContextValue | null>(null)
 
-function loadState(): AppState {
-  if (typeof window === "undefined") return initialState
-  try {
-    const storedVersion = localStorage.getItem(STORAGE_VERSION_KEY)
-    // If the version doesn't match, clear stale data and re-seed
-    if (storedVersion !== CURRENT_VERSION) {
-      localStorage.removeItem(STORAGE_KEY)
-      localStorage.setItem(STORAGE_VERSION_KEY, CURRENT_VERSION)
-      return initialState
-    }
-    const stored = localStorage.getItem(STORAGE_KEY)
-    if (stored) {
-      const parsed = JSON.parse(stored) as AppState
-      // Ensure all keys exist (handles schema upgrades)
-      return {
-        venues: parsed.venues ?? initialState.venues,
-        bookings: parsed.bookings ?? initialState.bookings,
-        parkingAreas: parsed.parkingAreas ?? initialState.parkingAreas,
-        roads: parsed.roads ?? initialState.roads,
-        triggerLogs: parsed.triggerLogs ?? initialState.triggerLogs,
-        overrideLogs: parsed.overrideLogs ?? initialState.overrideLogs,
-      }
-    }
-  } catch {
-    // Ignore parse errors
-  }
-  localStorage.setItem(STORAGE_VERSION_KEY, CURRENT_VERSION)
-  return initialState
-}
-
 export function StoreProvider({ children }: { children: React.ReactNode }) {
-  const [state, dispatch] = useReducer(reducer, initialState, loadState)
+  const [state, dispatch] = useReducer(reducer, initialState)
 
-  // Persist to localStorage on every state change
+  // Fetch initial data
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
-    } catch {
-      // Ignore quota errors
+    fetchInitialData().then((initialData) => {
+      dispatch({ type: "SET_STATE", payload: initialData })
+    }).catch((error) => {
+      console.error("Error loading initial data:", error)
+    })
+  }, [])
+
+  // Set up real-time subscriptions
+  useEffect(() => {
+    const subscription = subscribeToBookings((booking) => {
+      dispatch({ type: "UPDATE_BOOKING", payload: booking })
+    })
+
+    return () => {
+      subscription.unsubscribe()
     }
-  }, [state])
+  }, [dispatch])
 
   const addVenue = useCallback(
-    (venue: Venue) => dispatch({ type: "ADD_VENUE", payload: venue }),
+    async (venue: Venue) => {
+      try {
+        const newVenue = await createVenue(venue)
+        dispatch({ type: "ADD_VENUE", payload: newVenue })
+      } catch (error) {
+        console.error("Error creating venue:", error)
+        throw error
+      }
+    },
     []
   )
+
   const updateVenue = useCallback(
-    (venue: Venue) => dispatch({ type: "UPDATE_VENUE", payload: venue }),
+    async (venue: Venue) => {
+      try {
+        const updatedVenue = await updateVenueInDB(venue)
+        dispatch({ type: "UPDATE_VENUE", payload: updatedVenue })
+      } catch (error) {
+        console.error("Error updating venue:", error)
+        throw error
+      }
+    },
     []
   )
+
   const deleteVenue = useCallback(
-    (id: string) => dispatch({ type: "DELETE_VENUE", payload: id }),
+    async (id: string) => {
+      try {
+        await deleteVenueFromDB(id)
+        dispatch({ type: "DELETE_VENUE", payload: id })
+      } catch (error) {
+        console.error("Error deleting venue:", error)
+        throw error
+      }
+    },
     []
   )
+
   const addBooking = useCallback(
-    (booking: Booking) => dispatch({ type: "ADD_BOOKING", payload: booking }),
+    async (booking: Omit<Booking, 'id' | 'createdAt'>) => {
+      try {
+        const newBooking = await createBooking(booking)
+        dispatch({ type: "ADD_BOOKING", payload: newBooking })
+
+        // Log triggers if any conflicts
+        for (const conflict of booking.conflicts) {
+          await createTriggerLog({
+            bookingId: newBooking.id,
+            type: conflict.type,
+            severity: conflict.severity,
+            message: conflict.message,
+            resolved: false,
+          })
+        }
+      } catch (error) {
+        console.error("Error creating booking:", error)
+        throw error
+      }
+    },
     []
   )
+
   const updateBooking = useCallback(
-    (booking: Booking) =>
-      dispatch({ type: "UPDATE_BOOKING", payload: booking }),
+    async (booking: Booking) => {
+      try {
+        const updatedBooking = await updateBookingInDB(booking)
+        dispatch({ type: "UPDATE_BOOKING", payload: updatedBooking })
+
+        // Log override if status changed to override
+        if (booking.status === "override" && booking.overrideReason) {
+          await createOverrideLog({
+            bookingId: booking.id,
+            operatorName: booking.overriddenBy || "Unknown",
+            reason: booking.overrideReason,
+            conflicts: booking.conflicts,
+          })
+        }
+      } catch (error) {
+        console.error("Error updating booking:", error)
+        throw error
+      }
+    },
     []
   )
+
   const deleteBooking = useCallback(
-    (id: string) => dispatch({ type: "DELETE_BOOKING", payload: id }),
+    async (id: string) => {
+      try {
+        await deleteBookingFromDB(id)
+        dispatch({ type: "DELETE_BOOKING", payload: id })
+      } catch (error) {
+        console.error("Error deleting booking:", error)
+        throw error
+      }
+    },
     []
   )
+
+  const confirmBooking = useCallback(
+    async (id: string) => {
+      try {
+        const confirmedBooking = await confirmBookingInDB(id)
+        dispatch({ type: "UPDATE_BOOKING", payload: confirmedBooking })
+      } catch (error) {
+        console.error("Error confirming booking:", error)
+        throw error
+      }
+    },
+    []
+  )
+
+  const denyBooking = useCallback(
+    async (id: string, reason: string) => {
+      try {
+        const deniedBooking = await denyBookingInDB(id, reason)
+        dispatch({ type: "UPDATE_BOOKING", payload: deniedBooking })
+      } catch (error) {
+        console.error("Error denying booking:", error)
+        throw error
+      }
+    },
+    []
+  )
+
+  const cancelBooking = useCallback(
+    async (id: string, userId?: string) => {
+      try {
+        const cancelledBooking = await cancelBookingInDB(id, userId)
+        dispatch({ type: "UPDATE_BOOKING", payload: cancelledBooking })
+      } catch (error) {
+        console.error("Error cancelling booking:", error)
+        throw error
+      }
+    },
+    []
+  )
+
   const addTriggerLog = useCallback(
-    (log: TriggerLog) => dispatch({ type: "ADD_TRIGGER_LOG", payload: log }),
+    async (log: TriggerLog) => {
+      try {
+        const newLog = await createTriggerLog(log)
+        dispatch({ type: "ADD_TRIGGER_LOG", payload: newLog })
+      } catch (error) {
+        console.error("Error creating trigger log:", error)
+        throw error
+      }
+    },
     []
   )
+
   const addOverrideLog = useCallback(
-    (log: OverrideLog) =>
-      dispatch({ type: "ADD_OVERRIDE_LOG", payload: log }),
+    async (log: OverrideLog) => {
+      try {
+        const newLog = await createOverrideLog(log)
+        dispatch({ type: "ADD_OVERRIDE_LOG", payload: newLog })
+      } catch (error) {
+        console.error("Error creating override log:", error)
+        throw error
+      }
+    },
     []
   )
+
   const getVenueById = useCallback(
     (id: string) => state.venues.find((v) => v.id === id),
     [state.venues]
   )
+
   const getBookingsByVenue = useCallback(
     (venueId: string) => state.bookings.filter((b) => b.venueId === venueId),
     [state.bookings]
@@ -204,6 +327,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         addBooking,
         updateBooking,
         deleteBooking,
+        confirmBooking,
+        denyBooking,
+        cancelBooking,
         addTriggerLog,
         addOverrideLog,
         getVenueById,

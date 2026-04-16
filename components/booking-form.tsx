@@ -54,11 +54,12 @@ interface BookingFormProps {
 const STEPS = ["Event Details", "Schedule", "Risk & Triggers", "Review"]
 
 export function BookingFormDialog({ open, onOpenChange }: BookingFormProps) {
-  const { state, addBooking, addTriggerLog, addOverrideLog } = useStore()
+  const { state, addBooking } = useStore()
   const { role } = useRole()
   const [step, setStep] = useState(0)
   const [overrideOpen, setOverrideOpen] = useState(false)
   const [overrideReason, setOverrideReason] = useState("")
+  const [isSubmitting, setIsSubmitting] = useState(false) // Prevent double submission
 
   const [formData, setFormData] = useState({
     title: "",
@@ -139,65 +140,52 @@ export function BookingFormDialog({ open, onOpenChange }: BookingFormProps) {
     }
   }
 
-  function handleSubmit(isOverride = false) {
-    if (!formData.date) return
+  async function handleSubmit(isOverride = false) {
+    if (!formData.date || isSubmitting) return // Prevent double submission
 
-    const booking: Booking = {
-      id: `b${Date.now()}`,
-      title: formData.title,
-      description: formData.description,
-      venueId: formData.venueId,
-      date: format(formData.date, "yyyy-MM-dd"),
-      startTime: formData.startTime,
-      endTime: formData.endTime,
-      expectedAttendance: formData.expectedAttendance,
-      organizer: formData.organizer,
-      riskLevel: formData.riskLevel,
-      amplifiedNoise: formData.amplifiedNoise,
-      liquorLicense: formData.liquorLicense,
-      status: isOverride ? "override" : conflicts.length > 0 ? "pending" : "confirmed",
-      conflicts: isOverride ? conflicts : [],
-      overrideReason: isOverride ? overrideReason : undefined,
-      overriddenBy: isOverride ? `${role === "admin" ? "Admin" : "Operator"} User` : undefined,
-      overriddenAt: isOverride ? new Date().toISOString() : undefined,
-      createdAt: new Date().toISOString(),
-      createdBy: role,
+    setIsSubmitting(true) // Set submitting state
+
+    try {
+      // Get current user info - use role for now since we need synchronous access
+      const currentUser = `${role === "admin" ? "Admin" : "Operator"} User`
+
+      const booking: Booking = {
+        id: `b${Date.now()}`,
+        title: formData.title,
+        description: formData.description,
+        venueId: formData.venueId,
+        date: format(formData.date, "yyyy-MM-dd"),
+        startTime: formData.startTime,
+        endTime: formData.endTime,
+        expectedAttendance: formData.expectedAttendance,
+        organizer: formData.organizer,
+        riskLevel: formData.riskLevel,
+        amplifiedNoise: formData.amplifiedNoise,
+        liquorLicense: formData.liquorLicense,
+        status: "pending",
+        conflicts: isOverride ? conflicts : [],
+        overrideReason: isOverride ? overrideReason : undefined,
+        overriddenBy: isOverride ? currentUser : undefined,
+        overriddenAt: isOverride ? new Date().toISOString() : undefined,
+        createdAt: new Date().toISOString(),
+        createdBy: undefined,
+      }
+
+      await addBooking(booking)
+
+      toast.success(
+        isOverride
+          ? "Booking created with override"
+          : "Booking created successfully"
+      )
+      resetForm()
+      onOpenChange(false)
+    } catch (error) {
+      toast.error("Failed to create booking. Please try again.")
+      console.error("Booking creation error:", error)
+    } finally {
+      setIsSubmitting(false) // Reset submitting state
     }
-
-    addBooking(booking)
-
-    // Log triggers
-    for (const conflict of conflicts) {
-      addTriggerLog({
-        id: `tl${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        bookingId: booking.id,
-        type: conflict.type,
-        severity: conflict.severity,
-        message: conflict.message,
-        timestamp: new Date().toISOString(),
-        resolved: isOverride,
-      })
-    }
-
-    // Log override
-    if (isOverride) {
-      addOverrideLog({
-        id: `ol${Date.now()}`,
-        bookingId: booking.id,
-        operatorName: `${role === "admin" ? "Admin" : "Operator"} User`,
-        reason: overrideReason,
-        conflicts,
-        timestamp: new Date().toISOString(),
-      })
-    }
-
-    toast.success(
-      isOverride
-        ? "Booking created with override"
-        : "Booking created successfully"
-    )
-    resetForm()
-    onOpenChange(false)
   }
 
   return (
@@ -272,7 +260,7 @@ export function BookingFormDialog({ open, onOpenChange }: BookingFormProps) {
                         <div className="flex items-center gap-2">
                           <span>{v.name}</span>
                           <span className="text-muted-foreground text-xs">
-                            (max {v.maxPopulation.toLocaleString()})
+                            (max {v.maxPopulation?.toLocaleString() || 'N/A'})
                           </span>
                         </div>
                       </SelectItem>
@@ -281,7 +269,7 @@ export function BookingFormDialog({ open, onOpenChange }: BookingFormProps) {
                 </Select>
                 {selectedVenue && (
                   <p className="text-xs text-muted-foreground">
-                    Max capacity: {selectedVenue.maxPopulation.toLocaleString()} &middot; {selectedVenue.type} venue &middot; {selectedVenue.address}
+                    Max capacity: {selectedVenue.maxPopulation?.toLocaleString() || 'N/A'} &middot; {selectedVenue.type} venue &middot; {selectedVenue.address}
                   </p>
                 )}
               </div>
@@ -544,8 +532,9 @@ export function BookingFormDialog({ open, onOpenChange }: BookingFormProps) {
                     <Button
                       type="button"
                       onClick={() => handleSubmit(false)}
+                      disabled={isSubmitting}
                     >
-                      Confirm Booking
+                      {isSubmitting ? "Creating..." : "Confirm Booking"}
                     </Button>
                   )}
                 </>

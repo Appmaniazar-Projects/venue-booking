@@ -45,13 +45,13 @@ const navItems = [
     title: "Venues",
     href: "/venues",
     icon: Building2,
-    roles: ["admin"] as UserRole[],
+    roles: ["admin", "operator"] as UserRole[],
   },
   {
     title: "Bookings",
     href: "/bookings",
     icon: Ticket,
-    roles: ["admin", "operator"] as UserRole[],
+    roles: ["admin"] as UserRole[],
   },
   {
     title: "Calendar",

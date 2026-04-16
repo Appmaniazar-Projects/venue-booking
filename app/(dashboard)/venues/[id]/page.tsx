@@ -22,11 +22,15 @@ import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { useStore } from "@/lib/store"
+import { useRole } from "@/components/role-provider"
 import { VenueFormDialog } from "@/components/venue-form"
+import { VenueBookingForm } from "@/components/venue-booking-form"
+import { VenueAvailability } from "@/components/venue-availability"
 import { cn } from "@/lib/utils"
 import { useState } from "react"
 import { toast } from "sonner"
 import { useRouter } from "next/navigation"
+import { CalendarPlus } from "lucide-react"
 
 export default function VenueDetailPage({
   params,
@@ -35,7 +39,9 @@ export default function VenueDetailPage({
 }) {
   const { id } = use(params)
   const { state, getBookingsByVenue, deleteVenue } = useStore()
+  const { isAdmin, isOperator } = useRole()
   const [editOpen, setEditOpen] = useState(false)
+  const [bookingFormOpen, setBookingFormOpen] = useState(false)
   const router = useRouter()
 
   const venue = state.venues.find((v) => v.id === id)
@@ -44,20 +50,25 @@ export default function VenueDetailPage({
     notFound()
   }
 
-  const venueBookings = getBookingsByVenue(venue.id).filter(
+  const venueBookings = getBookingsByVenue(venue!.id).filter(
     (b) => b.status !== "cancelled"
   )
 
+  // Operator-specific: Show only operator's bookings for this venue
+  const operatorBookings = isOperator 
+    ? venueBookings.filter(b => b.organizer === "Test Operator")
+    : venueBookings
+
   const linkedParking = state.parkingAreas.filter((p) =>
-    p.linkedVenueIds.includes(venue.id)
+    p.linkedVenueIds.includes(venue!.id)
   )
   const linkedRoads = state.roads.filter((r) =>
-    r.linkedVenueIds.includes(venue.id)
+    r.linkedVenueIds.includes(venue!.id)
   )
 
   function handleDelete() {
-    deleteVenue(venue.id)
-    toast.success(`"${venue.name}" has been removed`)
+    deleteVenue(venue!.id)
+    toast.success(`"${venue!.name}" has been removed`)
     router.push("/venues")
   }
 
@@ -144,26 +155,6 @@ export default function VenueDetailPage({
               <span className="text-muted-foreground">{venue.ownerContact}</span>
             </div>
           </div>
-
-          <div className="flex items-center gap-2 mt-auto">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setEditOpen(true)}
-            >
-              <Pencil className="h-3.5 w-3.5 mr-1.5" />
-              Edit
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="text-destructive hover:text-destructive"
-              onClick={handleDelete}
-            >
-              <Trash2 className="h-3.5 w-3.5 mr-1.5" />
-              Delete
-            </Button>
-          </div>
         </div>
       </div>
 
@@ -173,20 +164,25 @@ export default function VenueDetailPage({
         <Card className="lg:col-span-2">
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-base">Upcoming Bookings</CardTitle>
+              <CardTitle className="text-base">
+                {isOperator ? "My Bookings" : "Upcoming Bookings"}
+              </CardTitle>
               <Badge variant="secondary" className="text-xs">
-                {venueBookings.length}
+                {operatorBookings.length}
               </Badge>
             </div>
           </CardHeader>
           <CardContent>
-            {venueBookings.length === 0 ? (
+            {operatorBookings.length === 0 ? (
               <p className="text-sm text-muted-foreground py-8 text-center">
-                No active bookings for this venue.
+                {isOperator 
+                  ? "You haven't booked this venue yet."
+                  : "No active bookings for this venue."
+                }
               </p>
             ) : (
               <div className="flex flex-col gap-2">
-                {venueBookings.map((booking) => (
+                {operatorBookings.map((booking) => (
                   <div
                     key={booking.id}
                     className="flex items-center gap-3 rounded-md border p-3"
@@ -222,8 +218,11 @@ export default function VenueDetailPage({
           </CardContent>
         </Card>
 
-        {/* Infrastructure */}
+        {/* Sidebar */}
         <div className="flex flex-col gap-6">
+          <VenueAvailability venue={venue!} />
+          
+          {/* Infrastructure */}
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
@@ -285,15 +284,23 @@ export default function VenueDetailPage({
           </Card>
 
           <div className="text-xs text-muted-foreground/60">
-            Added {format(parseISO(venue.createdAt), "MMM d, yyyy")}
+            Added {format(parseISO(venue!.createdAt), "MMM d, yyyy")}
           </div>
         </div>
       </div>
 
-      <VenueFormDialog
-        open={editOpen}
-        onOpenChange={setEditOpen}
-        venue={venue}
+      {isAdmin && (
+        <VenueFormDialog
+          open={editOpen}
+          onOpenChange={setEditOpen}
+          venue={venue}
+        />
+      )}
+
+      <VenueBookingForm 
+        open={bookingFormOpen}
+        onOpenChange={setBookingFormOpen}
+        venue={venue!}
       />
     </div>
   )

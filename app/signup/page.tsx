@@ -108,7 +108,16 @@ export default function SignupPage() {
 
           <div className="flex items-center justify-between text-sm">
             <span className="text-muted-foreground">
-              Admin accounts must be created separately.
+              Need admin access?
+            </span>
+            <Link href="/admin-signup" className="text-primary hover:underline">
+              Create admin account
+            </Link>
+          </div>
+
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-muted-foreground">
+              Already have an account?
             </span>
             <Link href="/login" className="text-primary hover:underline">
               Back to login

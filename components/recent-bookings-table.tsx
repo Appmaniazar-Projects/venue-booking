@@ -1,6 +1,6 @@
 "use client"
 
-import { format, parseISO } from "date-fns"
+import { format, parse, parseISO } from "date-fns"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import {
@@ -21,6 +21,15 @@ const statusStyles: Record<BookingStatus, string> = {
   pending: "bg-amber-500/10 text-amber-700 border-amber-500/20",
   cancelled: "bg-muted text-muted-foreground border-border",
   override: "bg-red-500/10 text-red-700 border-red-500/20",
+  denied: "bg-red-500/10 text-red-700 border-red-500/20",
+}
+
+function formatTimeLabel(time: string) {
+  return format(parse(time, "HH:mm", new Date()), "h:mm a")
+}
+
+function toStatusLabel(status: BookingStatus) {
+  return status.charAt(0).toUpperCase() + status.slice(1)
 }
 
 export function RecentBookingsTable() {
@@ -45,7 +54,7 @@ export function RecentBookingsTable() {
             <TableRow>
               <TableHead>Event</TableHead>
               <TableHead>Venue</TableHead>
-              <TableHead>Date</TableHead>
+              <TableHead>Date & Time</TableHead>
               <TableHead>Risk</TableHead>
               <TableHead>Status</TableHead>
             </TableRow>
@@ -69,8 +78,15 @@ export function RecentBookingsTable() {
                   <TableCell className="text-sm">
                     {venue?.name || "Unknown"}
                   </TableCell>
-                  <TableCell className="text-sm">
-                    {format(parseISO(booking.date), "MMM d, yyyy")}
+                  <TableCell>
+                    <div className="flex flex-col">
+                      <span className="text-sm">
+                        {format(parseISO(booking.date), "MMM d, yyyy")}
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        {formatTimeLabel(booking.startTime)} - {formatTimeLabel(booking.endTime)}
+                      </span>
+                    </div>
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-1.5">
@@ -90,7 +106,7 @@ export function RecentBookingsTable() {
                         statusStyles[booking.status]
                       )}
                     >
-                      {booking.status}
+                      {toStatusLabel(booking.status)}
                     </Badge>
                   </TableCell>
                 </TableRow>

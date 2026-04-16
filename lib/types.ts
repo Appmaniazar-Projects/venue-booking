@@ -1,5 +1,5 @@
 export type RiskLevel = "low" | "medium" | "high"
-export type BookingStatus = "confirmed" | "pending" | "cancelled" | "override"
+export type BookingStatus = "confirmed" | "pending" | "cancelled" | "override" | "denied"
 export type VenueType = "indoor" | "outdoor" | "hybrid"
 export type UserRole = "admin" | "operator"
 
@@ -19,7 +19,7 @@ export interface Booking {
   id: string
   venueId: string
   title: string
-  description: string
+  description?: string
   date: string // YYYY-MM-DD
   startTime: string // HH:mm
   endTime: string // HH:mm
@@ -34,7 +34,7 @@ export interface Booking {
   overriddenAt?: string
   conflicts: ConflictResult[]
   createdAt: string
-  createdBy: string
+  createdBy?: string
 }
 
 export interface ParkingArea {

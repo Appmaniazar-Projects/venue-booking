@@ -3,9 +3,11 @@
 import { Building2, Ticket, CalendarDays, AlertTriangle } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useStore } from "@/lib/store"
+import { useRole } from "@/components/role-provider"
 
 export function DashboardStats() {
   const { state } = useStore()
+  const { isOperator, isAdmin } = useRole()
 
   const totalVenues = state.venues.length
   const activeBookings = state.bookings.filter(
@@ -22,7 +24,51 @@ export function DashboardStats() {
     0
   )
 
-  const stats = [
+  // Operator-specific stats
+  const myBookings = state.bookings.filter((b) => {
+    const bookingDate = new Date(b.date)
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    return bookingDate >= today && b.status !== "cancelled" && b.status !== "denied"
+  }).length
+
+  const availableVenues = state.venues.filter(v => 
+    !state.bookings.some(b => 
+      b.venueId === v.id && 
+      (b.status === 'confirmed' || b.status === 'override')
+    )
+  ).length
+
+  const stats = isOperator ? [
+    {
+      title: "Total Venues",
+      value: totalVenues,
+      icon: Building2,
+      description: "Available for booking",
+      accent: "text-primary",
+    },
+    {
+      title: "Available Today",
+      value: availableVenues,
+      icon: CalendarDays,
+      description: "Not currently booked",
+      accent: "text-emerald-600",
+    },
+    {
+      title: "My Bookings",
+      value: myBookings,
+      icon: Ticket,
+      description: "Your upcoming events",
+      accent: "text-blue-600",
+    },
+    {
+      title: "Active Alerts",
+      value: activeAlerts,
+      icon: AlertTriangle,
+      description: "Conflict warnings",
+      accent: activeAlerts > 0 ? "text-red-600" : "text-muted-foreground",
+    },
+  ] : [
     {
       title: "Total Venues",
       value: totalVenues,
